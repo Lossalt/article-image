@@ -9,7 +9,7 @@
 
 declare(strict_types=1);
 
-const AI_CONFIG_FILE = __DIR__ . '/config.php';
+const AI_CONFIG_FILE = __DIR__ . '/article_image.config.php';
 
 function ai_config(): array
 {

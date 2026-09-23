@@ -48,11 +48,11 @@ JSON 示例：
 | 文件 | 作用 |
 |------|------|
 | `article_image.php` | 接口入口（全部逻辑） |
-| `config.php` | 站点配置 |
+| `article_image.config.php` | 站点配置 |
 
 ## 配置 Config
 
-编辑 `config.php`：
+编辑 `article_image.config.php`：
 
 ```php
 return [
@@ -89,7 +89,7 @@ return [
 
 ```text
 /wp-content/removeable/article_image.php
-/wp-content/removeable/config.php
+/wp-content/removeable/article_image.config.php
 /wp-content/removeable/article_images/cover-01.jpg
 /wp-content/removeable/article_images/cover-02.png
 ```
