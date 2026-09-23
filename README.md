@@ -6,6 +6,18 @@
 
 A movable / removable image-bed entry point for WordPress posts. Articles store a stable image name, not a physical path.
 
+姊妹项目：[random-img](https://github.com/Lossalt/random-img)（随机壁纸池，同样不绑死图文件位置）。
+
+## 快速开始 Quick start
+
+```text
+GET /article_image.php?res=cover-01       → 302
+GET /article_image.php?res=cover-01.jpg   → 302（指定格式）
+GET /article_image.php?res=cover-01&json  → JSON
+```
+
+详见下方「设计意图」与「用法」。
+
 ## 设计意图 Why removable
 
 传统 WordPress 媒体库会把**绝对地址**写进正文：
@@ -81,7 +93,8 @@ JSON 示例：
 | 文件 | 作用 |
 |------|------|
 | `article_image.php` | 接口入口（全部逻辑） |
-| `article_image.config.php` | 站点配置 |
+| `article_image.config.php` | 站点配置（独立命名，避免与其它 `config.php` 撞车） |
+| `article_images/.gitkeep` | 本地图片目录占位（可选） |
 
 ## 配置 Config
 
