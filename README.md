@@ -62,7 +62,7 @@ return [
     'check_local' => false,     // true：找不到就 404
 
     // res 允许：name 或 name.ext
-    'key_pattern' => '/^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9]{1,8])?$/',
+    'key_pattern' => '/^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9]{1,8})?$/',
 
     // 支持的格式（自动探测按此顺序找第一个存在的）
     'allowed_exts' => ['webp', 'jpg', 'jpeg', 'png', 'gif', 'avif'],
