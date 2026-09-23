@@ -2,8 +2,9 @@
 /**
  * article-image: named WordPress article image redirect.
  *
- *   /article_image.php?res=cover-01   → 302 to {base_url}/cover-01.webp
- *   /article_image.php?res=cover-01&json → JSON metadata
+ *   /article_image.php?res=cover-01        → 302 to {base_url}/cover-01.webp (or detected ext)
+ *   /article_image.php?res=cover-01.jpg    → 302 to {base_url}/cover-01.jpg
+ *   /article_image.php?res=cover-01&json   → JSON metadata
  */
 
 declare(strict_types=1);
@@ -79,77 +80,168 @@ function ai_fail(int $code, string $messageZh, string $messageEn): void
     echo $html;
 }
 
-function ai_normalize_key(): ?string
+/**
+ * @return list<string>
+ */
+function ai_allowed_exts(): array
+{
+    $cfg = ai_config();
+    $exts = $cfg['allowed_exts'] ?? ['webp', 'jpg', 'jpeg', 'png', 'gif', 'avif'];
+    if (!is_array($exts) || $exts === []) {
+        $exts = ['webp', 'jpg', 'jpeg', 'png', 'gif', 'avif'];
+    }
+
+    $out = [];
+    foreach ($exts as $ext) {
+        $ext = strtolower(ltrim((string) $ext, '.'));
+        if ($ext !== '') {
+            $out[] = $ext;
+        }
+    }
+    return $out;
+}
+
+function ai_default_ext(): string
+{
+    $cfg = ai_config();
+    $ext = strtolower(ltrim((string) ($cfg['default_ext'] ?? 'webp'), '.'));
+    $allowed = ai_allowed_exts();
+    return in_array($ext, $allowed, true) ? $ext : ($allowed[0] ?? 'webp');
+}
+
+function ai_is_allowed_ext(string $ext): bool
+{
+    return in_array(strtolower(ltrim($ext, '.')), ai_allowed_exts(), true);
+}
+
+/**
+ * Parse ?res= into [basename, ext|null].
+ *
+ * @return array{0:string,1:?string}|null
+ */
+function ai_parse_res(): ?array
 {
     $res = $_GET['res'] ?? null;
     if (!is_string($res)) {
         return null;
     }
 
-    // Reject raw control chars early.
     if (preg_match('/[\x00-\x1F\x7F]/', $res)) {
         return null;
     }
 
     $cfg = ai_config();
-    $pattern = $cfg['key_pattern'] ?? '/^[A-Za-z0-9_-]{1,64}$/';
+    $pattern = $cfg['key_pattern'] ?? '/^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9]{1,8})?$/';
     if (!is_string($pattern) || !preg_match($pattern, $res)) {
         return null;
     }
 
-    return $res;
+    $dot = strrpos($res, '.');
+    if ($dot === false || $dot === 0) {
+        return [$res, null];
+    }
+
+    $base = substr($res, 0, $dot);
+    $ext = substr($res, $dot + 1);
+    if ($base === '' || $ext === '') {
+        return null;
+    }
+    if (!ai_is_allowed_ext($ext)) {
+        return null;
+    }
+
+    return [$base, strtolower($ext)];
 }
 
-function ai_build_url(string $key): string
-{
-    $cfg = ai_config();
-    $base = rtrim((string) ($cfg['base_url'] ?? ''), '/');
-    $ext = (string) ($cfg['ext'] ?? 'webp');
-    $ext = ltrim($ext, '.');
-    return $base . '/' . rawurlencode($key) . '.' . $ext;
-}
-
-function ai_local_path(string $key): ?string
+function ai_image_dir(): string
 {
     $cfg = ai_config();
     $dir = (string) ($cfg['local_dir'] ?? '');
     if ($dir === '') {
-        // Default: sibling folder article_images/ next to this script.
-        $dir = __DIR__ . DIRECTORY_SEPARATOR . 'article_images';
-    } elseif (!preg_match('#^(?:[A-Za-z]:)?[\\\\/]#', $dir) && !str_starts_with($dir, '..')) {
-        $dir = __DIR__ . DIRECTORY_SEPARATOR . $dir;
+        return __DIR__ . DIRECTORY_SEPARATOR . 'article_images';
     }
+    if (!preg_match('#^(?:[A-Za-z]:)?[\\\\/]#', $dir) && !str_starts_with($dir, '..')) {
+        return __DIR__ . DIRECTORY_SEPARATOR . $dir;
+    }
+    return $dir;
+}
 
-    $ext = ltrim((string) ($cfg['ext'] ?? 'webp'), '.');
-    $file = $dir . DIRECTORY_SEPARATOR . $key . '.' . $ext;
+/**
+ * Find an existing local file for basename, optionally forcing one ext.
+ */
+function ai_find_local(string $base, ?string $ext): ?array
+{
+    $dir = ai_image_dir();
     $realDir = realpath($dir);
     if ($realDir === false) {
         return null;
     }
-    $realFile = realpath($file);
-    if ($realFile === false || !str_starts_with($realFile, $realDir)) {
+
+    $candidates = $ext === null ? ai_allowed_exts() : [$ext];
+    foreach ($candidates as $try) {
+        $file = $realDir . DIRECTORY_SEPARATOR . $base . '.' . $try;
+        $realFile = realpath($file);
+        if ($realFile !== false
+            && str_starts_with($realFile, $realDir)
+            && is_file($realFile)
+        ) {
+            return ['path' => $realFile, 'ext' => $try, 'file' => $base . '.' . $try];
+        }
+    }
+    return null;
+}
+
+/**
+ * Resolve final redirect target.
+ *
+ * @return array{key:string,base:string,ext:string,url:string,file:string,source:string}|null
+ */
+function ai_resolve(string $base, ?string $ext): ?array
+{
+    $cfg = ai_config();
+    $baseUrl = rtrim((string) ($cfg['base_url'] ?? ''), '/');
+
+    // Prefer a real local file when possible (correct ext even in redirect mode).
+    $local = ai_find_local($base, $ext);
+    if ($local !== null) {
+        return [
+            'key' => $ext === null ? $base : $base . '.' . $ext,
+            'base' => $base,
+            'ext' => $local['ext'],
+            'url' => $baseUrl . '/' . rawurlencode($base) . '.' . $local['ext'],
+            'file' => $local['file'],
+            'source' => 'local',
+        ];
+    }
+
+    if (!empty($cfg['check_local'])) {
         return null;
     }
-    return $realFile;
+
+    $useExt = $ext ?? ai_default_ext();
+    return [
+        'key' => $ext === null ? $base : $base . '.' . $ext,
+        'base' => $base,
+        'ext' => $useExt,
+        'url' => $baseUrl . '/' . rawurlencode($base) . '.' . $useExt,
+        'file' => $base . '.' . $useExt,
+        'source' => 'default-ext',
+    ];
 }
 
 function ai_handle(): void
 {
-    $key = ai_normalize_key();
-    if ($key === null) {
+    $parsed = ai_parse_res();
+    if ($parsed === null) {
         ai_fail(400, '参数错误。', 'Parameter Error.');
         return;
     }
 
-    $cfg = ai_config();
-    $url = ai_build_url($key);
-
-    if (!empty($cfg['check_local'])) {
-        $local = ai_local_path($key);
-        if ($local === null || !is_file($local)) {
-            ai_fail(404, '图片不存在。', 'Image not found.');
-            return;
-        }
+    [$base, $ext] = $parsed;
+    $pick = ai_resolve($base, $ext);
+    if ($pick === null) {
+        ai_fail(404, '图片不存在。', 'Image not found.');
+        return;
     }
 
     if (ai_wants_json()) {
@@ -157,16 +249,20 @@ function ai_handle(): void
         header('Cache-Control: no-store');
         header('Access-Control-Allow-Origin: *');
         echo json_encode([
-            'key' => $key,
-            'url' => $url,
-            'ext' => ltrim((string) ($cfg['ext'] ?? 'webp'), '.'),
+            'key' => $pick['key'],
+            'base' => $pick['base'],
+            'url' => $pick['url'],
+            'ext' => $pick['ext'],
+            'file' => $pick['file'],
+            'source' => $pick['source'],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         return;
     }
 
     header('Cache-Control: no-store');
-    header('X-Article-Image-Key: ' . $key);
-    header('Location: ' . $url, true, 302);
+    header('X-Article-Image-Key: ' . $pick['base']);
+    header('X-Article-Image-Ext: ' . $pick['ext']);
+    header('Location: ' . $pick['url'], true, 302);
     if (ai_is_head()) {
         exit;
     }

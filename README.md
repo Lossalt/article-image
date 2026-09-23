@@ -1,36 +1,45 @@
 # article-image
 
-WordPress 文章配图按名跳转接口。
+WordPress 文章配图按名跳转接口，支持 **webp / jpg / jpeg / png / gif / avif**。
 
-打开 `article_image.php?res=图片名` → `302` 跳到对应的 `.webp`。
+打开 `article_image.php?res=图片名` → `302` 跳到对应图片。
 
-Named WordPress article-image redirect API.
+Named WordPress article-image redirect API with multi-format support.
 
 ## 用法 Usage
 
 ```text
+# 不带扩展名：本地有图则自动探测格式；没有则用 default_ext
 https://你的站点/wp-content/removeable/article_image.php?res=cover-01
-→ 302 Location: https://cjsy.cc/wp-content/removeable/article_images/cover-01.webp
+
+# 带扩展名：精确指定格式
+https://你的站点/wp-content/removeable/article_image.php?res=cover-01.jpg
+https://你的站点/wp-content/removeable/article_image.php?res=cover-01.png
+
+# JSON 元数据
+https://你的站点/wp-content/removeable/article_image.php?res=cover-01&json
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `res` | 图片名（不含扩展名）。默认允许 `A-Za-z0-9_-`，最长 64 |
+| `res` | 图片名，可带扩展名。默认允许 `A-Za-z0-9_-`，最长 64；扩展名需在 `allowed_exts` 内 |
 | `json` | 可选。返回 JSON 而不是跳转 |
 
 JSON 示例：
 
-```bash
-curl "https://你的站点/.../article_image.php?res=cover-01&json"
-```
-
 ```json
 {
-  "key": "cover-01",
-  "url": "https://cjsy.cc/wp-content/removeable/article_images/cover-01.webp",
-  "ext": "webp"
+  "key": "cover-01.jpg",
+  "base": "cover-01",
+  "url": "https://cjsy.cc/wp-content/removeable/article_images/cover-01.jpg",
+  "ext": "jpg",
+  "file": "cover-01.jpg",
+  "source": "local"
 }
 ```
+
+- `source: local` — 本地目录里探测到了文件  
+- `source: default-ext` — 本地没有或未开检查，使用 `default_ext` 拼接  
 
 也支持请求头 `Accept: application/json`。
 
@@ -38,8 +47,8 @@ curl "https://你的站点/.../article_image.php?res=cover-01&json"
 
 | 文件 | 作用 |
 |------|------|
-| `article_image.php` | 接口入口（也是全部逻辑） |
-| `config.php` | 站点配置（地址、扩展名、校验规则） |
+| `article_image.php` | 接口入口（全部逻辑） |
+| `config.php` | 站点配置 |
 
 ## 配置 Config
 
@@ -47,66 +56,65 @@ curl "https://你的站点/.../article_image.php?res=cover-01&json"
 
 ```php
 return [
-    // 图片目录（跳转目标前缀，不要以 / 结尾）
     'base_url' => 'https://cjsy.cc/wp-content/removeable/article_images',
 
-    // 本地图片目录（开启 check_local 时使用）
-    // 空字符串 = 同目录下的 article_images/
-    'local_dir' => '',
+    'local_dir' => '',          // '' = 同目录 article_images/
+    'check_local' => false,     // true：找不到就 404
 
-    // true：本地没有该图则 404
-    // false：总是跳转（默认，适合图在远端 WordPress）
-    'check_local' => false,
+    // res 允许：name 或 name.ext
+    'key_pattern' => '/^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9]{1,8])?$/',
 
-    // res 参数允许的字符（白名单）
-    'key_pattern' => '/^[A-Za-z0-9_-]{1,64}$/',
+    // 支持的格式（自动探测按此顺序找第一个存在的）
+    'allowed_exts' => ['webp', 'jpg', 'jpeg', 'png', 'gif', 'avif'],
 
-    // 扩展名
-    'ext' => 'webp',
+    // 无扩展名且探测不到时用它
+    'default_ext' => 'webp',
 
-    // 参数错误时是否显示「请手下留情」说明
     'show_mercy_note' => true,
 ];
 ```
 
+### 多格式规则
+
+| 请求 | 本地有对应文件 | 结果 |
+|------|----------------|------|
+| `res=a` | 依次找 `a.webp` `a.jpg` `a.png`… | 跳到第一个找到的 |
+| `res=a.jpg` | 找 `a.jpg` | 跳到 `a.jpg`（没有则 404 / default） |
+| `res=a` | 都找不到，`check_local=false` | 跳到 `a.{default_ext}` |
+| `res=a` | 都找不到，`check_local=true` | 404 |
+
 ## 部署 Deploy
 
-### 方式 A：WordPress 站点内（推荐，和原用法一致）
-
-1. 把 `article_image.php`、`config.php` 放到：
+### 方式 A：WordPress 站点内
 
 ```text
 /wp-content/removeable/article_image.php
 /wp-content/removeable/config.php
+/wp-content/removeable/article_images/cover-01.jpg
+/wp-content/removeable/article_images/cover-02.png
 ```
 
-2. 图片放在：
+访问：
 
 ```text
-/wp-content/removeable/article_images/cover-01.webp
+.../article_image.php?res=cover-01.jpg
+.../article_image.php?res=cover-02        # 自动探测到 .png
 ```
 
-3. 访问：
+建议 `check_local = true`，这样缺图返回 404 而不是跳到空地址。
 
-```text
-https://你的站点/wp-content/removeable/article_image.php?res=cover-01
-```
+### 方式 B：独立跳转
 
-若图片就在旁边的 `article_images/`，可把 `check_local` 设为 `true`，不存在的图会返回 404，而不是跳到空地址。
+两个 PHP 放到任意 PHP 空间，改 `base_url` 即可。图在远端时：
 
-### 方式 B：独立小站反代/跳转
+- 带扩展名的 `res=a.png` 最准确  
+- 不带扩展名则用 `default_ext`（默认 webp）
 
-把两个 PHP 放到任意 PHP 空间，改 `base_url` 指向真实图片地址即可。
+## 安全 Security
 
-## 相比原脚本的安全改进
-
-| 原来 | 现在 |
-|------|------|
-| 黑名单剔除一堆符号，漏了就可能出问题 | **白名单**正则，只允许合法图片名 |
-| 未校验空参数 / 过长参数 | 非法或超长直接 400 |
-| 图片不存在也可能 302 | 可选本地检查，404 |
-| 错误页无独立样式 | 规范 HTML / 可选 JSON |
-| 无响应头标记 | 带 `X-Article-Image-Key` |
+- 白名单校验图片名与扩展名（不是黑名单剔符号）  
+- 拒绝控制字符、路径穿越  
+- 本地解析时用 `realpath` 限制在图片目录内  
 
 ## License
 
