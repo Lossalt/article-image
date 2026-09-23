@@ -1,10 +1,43 @@
 # article-image
 
-WordPress 文章配图按名跳转接口，支持 **webp / jpg / jpeg / png / gif / avif**。
+**可搬迁图床的命名入口**（removable image bed）：文章里只写稳定图片名，物理文件可以放在本机 WordPress 目录、另一台服务器或对象存储；换机/迁站时改一行 `base_url`，正文不必改写。
 
-打开 `article_image.php?res=图片名` → `302` 跳到对应图片。
+支持 **webp / jpg / jpeg / png / gif / avif**。打开 `article_image.php?res=图片名` → `302` 跳到对应图片。
 
-Named WordPress article-image redirect API with multi-format support.
+A movable / removable image-bed entry point for WordPress posts. Articles store a stable image name, not a physical path.
+
+## 设计意图 Why removable
+
+传统 WordPress 媒体库会把**绝对地址**写进正文：
+
+```text
+文章 HTML → https://旧站/wp-content/uploads/2024/06/foo.jpg
+```
+
+换服务器、换域名、换目录、整站迁移时，正文里的路径全部失效，图床一搬文章就「丢图」。
+
+本项目把引用拆成两层：
+
+```text
+文章正文（稳定）
+    article_image.php?res=cover-01
+            │
+            │  302（只改配置即可换指向）
+            ▼
+图床（可拆、可搬、removeable）
+    wp-content/removeable/article_images/   ← 可以不在这
+    或 https://图床服务器/...
+    或对象存储 / CDN
+```
+
+| 约定 | 作用 |
+|------|------|
+| 路径里的 `removeable` | 提醒：图床目录是**可拆卸**的附属件，不绑死在当前 WP |
+| `?res=名字` | 正文只记**逻辑名**，不记物理路径 |
+| `base_url` 一行配置 | 图迁到另一台机器/另一个域名，只改这里 |
+| `article_image.config.php` 独立文件名 | 入口可贴在 WP，配置与图可一起搬走，且不易和别的 `config.php` 撞名 |
+
+一句话：**解耦「文章里的引用」和「图实际放哪」**，让图床可移动、整站迁移不丢图。
 
 ## 用法 Usage
 
@@ -103,12 +136,35 @@ return [
 
 建议 `check_local = true`，这样缺图返回 404 而不是跳到空地址。
 
-### 方式 B：独立跳转
+### 方式 B：图床在另一台服务器（removable 的典型用法）
 
-两个 PHP 放到任意 PHP 空间，改 `base_url` 即可。图在远端时：
+WordPress 站只放两个 PHP：
+
+```text
+/wp-content/removeable/article_image.php
+/wp-content/removeable/article_image.config.php
+```
+
+图片放在别的机器（或对象存储），只改配置：
+
+```php
+'base_url' => 'https://img.example.com/article_images',
+'check_local' => false,
+```
+
+正文写法完全不用变。以后图床再搬家，仍然只改 `base_url`。
+
+图在远端时：
 
 - 带扩展名的 `res=a.png` 最准确  
 - 不带扩展名则用 `default_ext`（默认 webp）
+
+### 方式 C：整站迁移 checklist
+
+1. 导出/迁移 `article_images/` 里的文件（或上传到新图床）  
+2. 新环境部署 `article_image.php` + `article_image.config.php`  
+3. 修改 `base_url`（以及需要时的 `local_dir`）  
+4. **不用**批量替换文章正文里的图片地址
 
 ## 安全 Security
 
